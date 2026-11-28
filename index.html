@@ -163,7 +163,8 @@
       liveDevicesCount=$("liveDevicesCount"),liveDevicesBadge=$("liveDevicesBadge"),shareLinkBtn=$("shareLinkBtn");
 
     let lang=localStorage.getItem("my_ai_lang")||"ar",voices=[],mode="login",history=[],busy=false,activeUserName="Guest",
-      currentUser=null,currentAvatar="",isListening=false,recognition=null,realtimeSub=null,pendingReqId=null,presenceChannel=null,presenceSubscribed=false;
+      currentUser=null,currentAvatar="",isListening=false,recognition=null,realtimeSub=null,pendingReqId=null,
+      presenceChannel=null,presenceSubscribed=false,presenceTimer=null;
 
     const deviceId="dev-"+(crypto?.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2,12));
 
@@ -220,7 +221,21 @@
       try{await presenceChannel.untrack();}catch{}
     }
 
+    function stopPeriodicPresenceSync(){
+      if(presenceTimer){clearInterval(presenceTimer);presenceTimer=null;}
+    }
+
+    function startPeriodicPresenceSync(){
+      stopPeriodicPresenceSync();
+      presenceTimer=setInterval(async()=>{
+        if(document.hidden||!presenceChannel||!presenceSubscribed)return;
+        await trackCurrentDevice();
+        updateLiveDevicesCount();
+      },5000);
+    }
+
     function startLiveDeviceTracker(){
+      stopPeriodicPresenceSync();
       if(presenceChannel){sb.removeChannel(presenceChannel);presenceChannel=null;}
       presenceSubscribed=false;
       presenceChannel=sb.channel("my-ai-live-devices",{config:{presence:{key:deviceId}}});
@@ -233,17 +248,20 @@
             presenceSubscribed=true;
             await trackCurrentDevice();
             updateLiveDevicesCount();
+            startPeriodicPresenceSync();
           }
         });
     }
 
-    window.addEventListener("pagehide",()=>{untrackCurrentDevice();});
-    window.addEventListener("beforeunload",()=>{untrackCurrentDevice();});
-    document.addEventListener("visibilitychange",()=>{
+    window.addEventListener("pagehide",()=>{stopPeriodicPresenceSync();untrackCurrentDevice();});
+    window.addEventListener("beforeunload",()=>{stopPeriodicPresenceSync();untrackCurrentDevice();});
+    document.addEventListener("visibilitychange",async()=>{
       if(document.hidden){
-        untrackCurrentDevice();
+        await untrackCurrentDevice();
+        updateLiveDevicesCount();
       }else{
-        trackCurrentDevice();
+        await trackCurrentDevice();
+        updateLiveDevicesCount();
       }
     });
 
