@@ -164,7 +164,7 @@
 
     let lang=localStorage.getItem("my_ai_lang")||"ar",voices=[],mode="login",history=[],busy=false,activeUserName="Guest",
       currentUser=null,currentAvatar="",isListening=false,recognition=null,realtimeSub=null,pendingReqId=null,
-      presenceChannel=null,presenceSubscribed=false,presenceTimer=null;
+      presenceChannel=null,presenceSubscribed=false,presenceTimer=null,lastTrackedAt=0;
 
     const deviceId="dev-"+(crypto?.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2,12));
 
@@ -196,27 +196,40 @@
       }
     };
 
+    function countPresenceEntries(state){
+      if(!state||typeof state!=="object")return 0;
+      let total=0;
+      for(const k of Object.keys(state)){
+        const arr=Array.isArray(state[k])?state[k]:[];
+        total+=arr.length;
+      }
+      return total;
+    }
+
     function updateLiveDevicesCount(){
       if(!presenceChannel)return;
       const state=presenceChannel.presenceState()||{};
-      const keys=Object.keys(state);
-      const total=keys.length;
+      const total=countPresenceEntries(state);
       liveDevicesCount.textContent=String(total);
       liveDevicesBadge.title=lang==="ar"?`الأجهزة النشطة الآن: ${total}`:`Active devices now: ${total}`;
     }
 
-    async function trackCurrentDevice(){
+    async function trackCurrentDevice(force=false){
       if(!presenceChannel||!presenceSubscribed||document.hidden)return;
+      const now=Date.now();
+      if(!force&&now-lastTrackedAt<3000)return;
+      lastTrackedAt=now;
       try{
         await presenceChannel.track({
           device_id:deviceId,
           user:activeUserName||"Guest",
-          joined_at:new Date().toISOString()
+          at:now
         });
       }catch{}
     }
 
     async function untrackCurrentDevice(){
+      lastTrackedAt=0;
       if(!presenceChannel)return;
       try{await presenceChannel.untrack();}catch{}
     }
@@ -228,17 +241,18 @@
     function startPeriodicPresenceSync(){
       stopPeriodicPresenceSync();
       presenceTimer=setInterval(async()=>{
-        if(document.hidden||!presenceChannel||!presenceSubscribed)return;
-        await trackCurrentDevice();
+        if(!presenceChannel||!presenceSubscribed)return;
+        if(!document.hidden)await trackCurrentDevice(false);
         updateLiveDevicesCount();
-      },5000);
+      },250);
     }
 
     function startLiveDeviceTracker(){
       stopPeriodicPresenceSync();
       if(presenceChannel){sb.removeChannel(presenceChannel);presenceChannel=null;}
       presenceSubscribed=false;
-      presenceChannel=sb.channel("my-ai-live-devices",{config:{presence:{key:deviceId}}});
+      lastTrackedAt=0;
+      presenceChannel=sb.channel("my-ai-live-devices");
       presenceChannel
         .on("presence",{event:"sync"},updateLiveDevicesCount)
         .on("presence",{event:"join"},updateLiveDevicesCount)
@@ -246,7 +260,7 @@
         .subscribe(async status=>{
           if(status==="SUBSCRIBED"){
             presenceSubscribed=true;
-            await trackCurrentDevice();
+            await trackCurrentDevice(true);
             updateLiveDevicesCount();
             startPeriodicPresenceSync();
           }
@@ -260,7 +274,7 @@
         await untrackCurrentDevice();
         updateLiveDevicesCount();
       }else{
-        await trackCurrentDevice();
+        await trackCurrentDevice(true);
         updateLiveDevicesCount();
       }
     });
@@ -356,7 +370,7 @@
       currentAvatar=saved?.avatar_url||row.avatar_url;
       userLabel.textContent=activeUserName;renderAvatars();
       userInfo.textContent=`${activeUserName} (${user.email})`;
-      await trackCurrentDevice();
+      await trackCurrentDevice(true);
     }
 
     function subscribeLoginAlerts(userId){
